@@ -1,0 +1,13 @@
+package config
+
+const (
+	envEnvironment      = "ENVIRONMENT"
+	envLogLevel         = "LOG_LEVEL"
+	envAppPort          = "APP_PORT"
+	envDatabaseURL      = "DATABASE_URL"
+	envMigrationsFolder = "MIGRATIONS_FOLDER"
+	envDBMaxOpenConns   = "DB_MAX_OPEN_CONNS"
+	envDBMaxIdleConns   = "DB_MAX_IDLE_CONNS"
+	envJWTSecret        = "JWT_SECRET"
+	envAdminToken       = "ADMIN_TOKEN"
+)

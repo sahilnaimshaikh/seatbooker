@@ -1,0 +1,154 @@
+package config
+
+import (
+	"encoding/json"
+	"fmt"
+	"os"
+	"strconv"
+	"time"
+)
+
+const (
+	defaultAppPort          = 8080
+	defaultLogLevel         = "info"
+	defaultMigrationsFolder = "migrations"
+	defaultDBMaxOpenConns   = 20
+	defaultDBMaxIdleConns   = 10
+	defaultDBConnTimeout    = 5 * time.Second
+	defaultJWTExpiry        = 24 * time.Hour
+)
+
+// Getter exposes read-only access to configuration. Handlers and factories
+// depend on this interface rather than the concrete Config so tests can
+// supply fakes.
+type Getter interface {
+	GetEnvironment() string
+	GetAppPort() int
+	GetLogLevel() string
+	GetDatabaseURL() string
+	GetMigrationsFolder() string
+	GetDBMaxOpenConns() int
+	GetDBMaxIdleConns() int
+	GetDBConnTimeout() time.Duration
+	GetJWTSecret() string
+	GetJWTExpiry() time.Duration
+	GetAdminToken() string
+}
+
+var _ Getter = (*Config)(nil)
+
+// Config holds all runtime configuration for the service, sourced from
+// environment variables. There is no secrets file — every value here is
+// safe to log except JWTSecret and AdminToken, which Loggable redacts.
+type Config struct {
+	Environment      string        `json:"environment"`
+	LogLevel         string        `json:"log_level"`
+	AppPort          int           `json:"app_port"`
+	DatabaseURL      string        `json:"-"`
+	MigrationsFolder string        `json:"migrations_folder"`
+	DBMaxOpenConns   int           `json:"db_max_open_conns"`
+	DBMaxIdleConns   int           `json:"db_max_idle_conns"`
+	DBConnTimeout    time.Duration `json:"db_conn_timeout"`
+	JWTSecret        string        `json:"-"`
+	JWTExpiry        time.Duration `json:"jwt_expiry"`
+	AdminToken       string        `json:"-"`
+}
+
+func (c Config) GetEnvironment() string          { return c.Environment }
+func (c Config) GetAppPort() int                 { return c.AppPort }
+func (c Config) GetLogLevel() string             { return c.LogLevel }
+func (c Config) GetDatabaseURL() string          { return c.DatabaseURL }
+func (c Config) GetMigrationsFolder() string     { return c.MigrationsFolder }
+func (c Config) GetDBMaxOpenConns() int          { return c.DBMaxOpenConns }
+func (c Config) GetDBMaxIdleConns() int          { return c.DBMaxIdleConns }
+func (c Config) GetDBConnTimeout() time.Duration { return c.DBConnTimeout }
+func (c Config) GetJWTSecret() string            { return c.JWTSecret }
+func (c Config) GetJWTExpiry() time.Duration     { return c.JWTExpiry }
+func (c Config) GetAdminToken() string           { return c.AdminToken }
+
+// New loads configuration from environment variables, applying defaults for
+// anything not explicitly set. DATABASE_URL, JWT_SECRET, and ADMIN_TOKEN
+// are mandatory — the service refuses to start without them rather than
+// falling back to an insecure default.
+func New() (*Config, error) {
+	databaseURL, err := mandatory(envDatabaseURL)
+	if err != nil {
+		return nil, err
+	}
+	jwtSecret, err := mandatory(envJWTSecret)
+	if err != nil {
+		return nil, err
+	}
+	adminToken, err := mandatory(envAdminToken)
+	if err != nil {
+		return nil, err
+	}
+
+	cfg := &Config{
+		Environment:      optional(envEnvironment, "dev"),
+		LogLevel:         optional(envLogLevel, defaultLogLevel),
+		AppPort:          optionalInt(envAppPort, defaultAppPort),
+		DatabaseURL:      databaseURL,
+		MigrationsFolder: optional(envMigrationsFolder, defaultMigrationsFolder),
+		DBMaxOpenConns:   optionalInt(envDBMaxOpenConns, defaultDBMaxOpenConns),
+		DBMaxIdleConns:   optionalInt(envDBMaxIdleConns, defaultDBMaxIdleConns),
+		DBConnTimeout:    defaultDBConnTimeout,
+		JWTSecret:        jwtSecret,
+		JWTExpiry:        defaultJWTExpiry,
+		AdminToken:       adminToken,
+	}
+
+	return cfg, nil
+}
+
+// Loggable renders the config as JSON with secrets stripped, safe to put in
+// a startup log line.
+func (c Config) Loggable() []byte {
+	data, err := json.Marshal(c)
+	if err != nil {
+		return fmt.Appendf(nil, `{"error":%q}`, err.Error())
+	}
+	return data
+}
+
+// mandatory reads key from the environment, returning an error if it is
+// unset or empty — used for values that must never silently fall back to
+// a default (secrets, connection strings).
+func mandatory(key string) (string, error) {
+	v := os.Getenv(key)
+	if v == "" {
+		return "", fmt.Errorf("config: %s is required", key)
+	}
+	return v, nil
+}
+
+func optional(key, fallback string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return fallback
+}
+
+func optionalInt(key string, fallback int) int {
+	v := os.Getenv(key)
+	if v == "" {
+		return fallback
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil {
+		return fallback
+	}
+	return n
+}
+
+func optionalBool(key string, fallback bool) bool {
+	v := os.Getenv(key)
+	if v == "" {
+		return fallback
+	}
+	b, err := strconv.ParseBool(v)
+	if err != nil {
+		return fallback
+	}
+	return b
+}
