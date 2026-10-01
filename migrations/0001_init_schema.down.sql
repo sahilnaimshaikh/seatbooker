@@ -1,0 +1,4 @@
+DROP TABLE IF EXISTS user_show_counts;
+DROP TABLE IF EXISTS reservations;
+DROP TABLE IF EXISTS seats;
+DROP TABLE IF EXISTS shows;
