@@ -18,8 +18,8 @@ func NewShowService(conn *sql.DB) *ShowService {
 }
 
 func (s *ShowService) CreateShow(ctx context.Context, name string, seatNos []string, pricePaise, perUserLimit int) (ShowSummary, error) {
-	if name == "" || len(seatNos) == 0 || pricePaise < 0 {
-		return ShowSummary{}, newError(CodeInvalidInput, "name, seats, and non-negative price_paise are required")
+	if name == "" || len(seatNos) == 0 || pricePaise < 0 || perUserLimit <= 0 {
+		return ShowSummary{}, newError(CodeInvalidInput, "name, seats, non-negative price_paise, and positive per_user_limit are required")
 	}
 
 	tx, err := s.conn.BeginTx(ctx, nil)

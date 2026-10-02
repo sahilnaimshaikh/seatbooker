@@ -1,12 +1,16 @@
 package middleware
 
 import (
+	"crypto/subtle"
 	"net/http"
+	"strings"
 	"time"
 
+	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
 	"github.com/rs/zerolog"
 
+	"github.com/paytm-hack/seatbooking/pkg/httpjson"
 	"github.com/paytm-hack/seatbooking/pkg/logctx"
 	"github.com/paytm-hack/seatbooking/pkg/reqctx"
 )
@@ -60,7 +64,7 @@ func Logging(base zerolog.Logger) Middleware {
 				Int("status", rec.status).
 				Str("user_id", reqctx.UserID(ctx)).
 				Dur("latency_ms", time.Since(start)).
-				Msg("request_handled")
+				Msg("Details of " + r.URL.Path)
 		})
 	}
 }
@@ -76,4 +80,47 @@ func Recover(next http.Handler) http.Handler {
 		}()
 		next.ServeHTTP(w, r)
 	})
+}
+
+func RequireUser(secret string) Middleware {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+			tokenString, ok := bearerToken(request)
+			if !ok || secret == "" {
+				httpjson.WriteError(writer, http.StatusUnauthorized, "unauthorized", "valid bearer token required")
+				return
+			}
+
+			claims := &jwt.RegisteredClaims{}
+			_, err := jwt.ParseWithClaims(tokenString, claims, func(*jwt.Token) (any, error) {
+				return []byte(secret), nil
+			}, jwt.WithValidMethods([]string{jwt.SigningMethodHS256.Alg()}), jwt.WithExpirationRequired())
+			if err != nil || claims.Subject == "" {
+				httpjson.WriteError(writer, http.StatusUnauthorized, "unauthorized", "valid bearer token required")
+				return
+			}
+
+			ctx := reqctx.WithUserID(request.Context(), claims.Subject)
+			next.ServeHTTP(writer, request.WithContext(ctx))
+		})
+	}
+}
+
+func RequireAdmin(adminToken string) Middleware {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+			token, ok := bearerToken(request)
+			if !ok || adminToken == "" || subtle.ConstantTimeCompare([]byte(token), []byte(adminToken)) != 1 {
+				httpjson.WriteError(writer, http.StatusUnauthorized, "unauthorized", "admin bearer token required")
+				return
+			}
+			next.ServeHTTP(writer, request)
+		})
+	}
+}
+
+func bearerToken(request *http.Request) (string, bool) {
+	value := request.Header.Get("Authorization")
+	scheme, token, ok := strings.Cut(value, " ")
+	return token, ok && strings.EqualFold(scheme, "Bearer") && token != "" && !strings.Contains(token, " ")
 }
