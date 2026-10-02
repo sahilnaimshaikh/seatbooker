@@ -95,15 +95,7 @@ func ReserveSeat(reservations ReservationService) http.HandlerFunc {
 			writeInvalidJSON(writer)
 			return
 		}
-		idempotencyKey := input.IdempotencyKey
-		if headerKey := strings.TrimSpace(request.Header.Get("Idempotency-Key")); headerKey != "" {
-			if idempotencyKey != "" && idempotencyKey != headerKey {
-				httpjson.WriteError(writer, http.StatusBadRequest, "invalid_input", "idempotency key header and body do not match")
-				return
-			}
-			idempotencyKey = headerKey
-		}
-		reservation, err := reservations.Reserve(request.Context(), showID, reqctx.UserID(request.Context()), input.Seats, idempotencyKey)
+		reservation, err := reservations.Reserve(request.Context(), showID, reqctx.UserID(request.Context()), input.Seats, input.IdempotencyKey)
 		if err != nil {
 			writeServiceError(writer, err)
 			return
@@ -129,6 +121,8 @@ func CancelReservation(reservations ReservationService) http.HandlerFunc {
 
 func decodeJSON(writer http.ResponseWriter, request *http.Request, destination any) error {
 	request.Body = http.MaxBytesReader(writer, request.Body, 1<<20)
+	defer request.Body.Close()
+
 	decoder := json.NewDecoder(request.Body)
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(destination); err != nil {
@@ -158,7 +152,7 @@ func writeServiceError(writer http.ResponseWriter, err error) {
 	switch serviceErr.Code {
 	case service.CodeNotFound:
 		status = http.StatusNotFound
-	case service.CodeSeatTaken, service.CodePerUserLimit, service.CodeIdempotencyConflict:
+	case service.CodeConflict, service.CodeSeatTaken, service.CodePerUserLimit, service.CodeIdempotencyConflict:
 		status = http.StatusConflict
 	case service.CodeInvalidInput:
 		status = http.StatusBadRequest

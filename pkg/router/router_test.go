@@ -3,6 +3,7 @@ package router_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -38,13 +39,25 @@ func (*testShows) GetShow(context.Context, string) (service.ShowSummary, error) 
 }
 
 type testReservations struct {
-	reserveCalled bool
-	reserveUserID string
+	reserveCalled         bool
+	reserveUserID         string
+	reserveIdempotencyKey string
 }
 
-func (reservations *testReservations) Reserve(_ context.Context, showID, userID string, seats []string, _ string) (service.Reservation, error) {
+type testDatabase struct {
+	pingErr   error
+	pingCalls int
+}
+
+func (database *testDatabase) PingContext(context.Context) error {
+	database.pingCalls++
+	return database.pingErr
+}
+
+func (reservations *testReservations) Reserve(_ context.Context, showID, userID string, seats []string, idempotencyKey string) (service.Reservation, error) {
 	reservations.reserveCalled = true
 	reservations.reserveUserID = userID
+	reservations.reserveIdempotencyKey = idempotencyKey
 	return service.Reservation{
 		ID: "reservation-id", ShowID: showID, UserID: userID, Seats: seats,
 		AmountPaise: 25000, Status: contract.ReservationStatusConfirmed,
@@ -54,10 +67,15 @@ func (reservations *testReservations) Reserve(_ context.Context, showID, userID 
 func (*testReservations) Cancel(context.Context, string, string) error { return nil }
 
 func newTestRouter(shows *testShows, reservations *testReservations) http.Handler {
+	return newTestRouterWithDatabase(shows, reservations, &testDatabase{})
+}
+
+func newTestRouterWithDatabase(shows *testShows, reservations *testReservations, database *testDatabase) http.Handler {
 	ctx, _ := logctx.New(context.Background(), "test")
 	return router.New(&router.Router{
 		Shows:        shows,
 		Reservations: reservations,
+		Database:     database,
 		AppConfig: &config.Config{
 			JWTSecret: "jwt-secret", JWTExpiry: time.Hour, AdminToken: "admin-secret",
 		},
@@ -116,6 +134,7 @@ func TestReserveUsesAuthenticatedUserIdentity(t *testing.T) {
 
 	request = httptest.NewRequest(http.MethodPost, "/shows/"+testShowID+"/reserve", strings.NewReader(`{"seats":["A1"],"idempotency_key":"key-1"}`))
 	request.Header.Set("Authorization", "Bearer "+loginBody.Data.Token)
+	request.Header.Set("Idempotency-Key", "ignored-header-key")
 	response := httptest.NewRecorder()
 	httpHandler.ServeHTTP(response, request)
 
@@ -124,6 +143,9 @@ func TestReserveUsesAuthenticatedUserIdentity(t *testing.T) {
 	}
 	if !reservations.reserveCalled || reservations.reserveUserID != "token-user" {
 		t.Fatalf("expected token subject as reservation identity, got called=%t user=%q", reservations.reserveCalled, reservations.reserveUserID)
+	}
+	if reservations.reserveIdempotencyKey != "key-1" {
+		t.Fatalf("expected idempotency key from request body, got %q", reservations.reserveIdempotencyKey)
 	}
 }
 
@@ -148,5 +170,34 @@ func TestLoginRejectsEmptyUserID(t *testing.T) {
 
 	if response.Code != http.StatusBadRequest {
 		t.Fatalf("expected status %d, got %d", http.StatusBadRequest, response.Code)
+	}
+}
+
+func TestHealthEndpointsCheckOnlyReadinessDependency(t *testing.T) {
+	database := &testDatabase{pingErr: errors.New("database unavailable")}
+	httpHandler := newTestRouterWithDatabase(&testShows{}, &testReservations{}, database)
+
+	livenessRequest := httptest.NewRequest(http.MethodGet, router.LivenessPath, nil)
+	livenessResponse := httptest.NewRecorder()
+	httpHandler.ServeHTTP(livenessResponse, livenessRequest)
+	if livenessResponse.Code != http.StatusOK {
+		t.Fatalf("expected liveness status %d, got %d", http.StatusOK, livenessResponse.Code)
+	}
+	if database.pingCalls != 0 {
+		t.Fatalf("liveness must not ping the database, got %d ping calls", database.pingCalls)
+	}
+
+	readinessRequest := httptest.NewRequest(http.MethodGet, router.ReadinessPath, nil)
+	readinessResponse := httptest.NewRecorder()
+	httpHandler.ServeHTTP(readinessResponse, readinessRequest)
+	if readinessResponse.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected readiness status %d, got %d", http.StatusServiceUnavailable, readinessResponse.Code)
+	}
+
+	database.pingErr = nil
+	readinessResponse = httptest.NewRecorder()
+	httpHandler.ServeHTTP(readinessResponse, readinessRequest)
+	if readinessResponse.Code != http.StatusOK {
+		t.Fatalf("expected readiness status %d after successful ping, got %d", http.StatusOK, readinessResponse.Code)
 	}
 }

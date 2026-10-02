@@ -15,6 +15,10 @@ type LoginResponse struct {
 	Token string `json:"token"`
 }
 
+type HealthResponse struct {
+	Status string `json:"status"`
+}
+
 type CreateShowRequest struct {
 	Name         string   `json:"name"`
 	Seats        []string `json:"seats"`

@@ -4,6 +4,7 @@ type Code string
 
 const (
 	CodeNotFound            Code = "not_found"
+	CodeConflict            Code = "conflict"
 	CodeSeatTaken           Code = "seat_taken"
 	CodePerUserLimit        Code = "per_user_limit"
 	CodeIdempotencyConflict Code = "idempotency_key_reused"

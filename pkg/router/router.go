@@ -18,11 +18,14 @@ const (
 	GetShowPath           = "/shows/{id}"
 	ReserveSeatPath       = "/shows/{id}/reserve"
 	CancelReservationPath = "/reservations/{id}/cancel"
+	LivenessPath          = "/health"
+	ReadinessPath         = "/ready"
 )
 
 type Router struct {
 	Shows        handler.ShowService
 	Reservations handler.ReservationService
+	Database     handler.ReadinessChecker
 	AppConfig    *config.Config
 	Context      context.Context
 }
@@ -47,6 +50,8 @@ func New(r *Router) http.Handler {
 	router.Handle(GetShowPath, middleware.Wrap(handler.GetShow(r.Shows), middlewares...)).Methods(http.MethodGet)
 	router.Handle(ReserveSeatPath, middleware.Wrap(handler.ReserveSeat(r.Reservations), middlewaresWithUserAuth...)).Methods(http.MethodPost)
 	router.Handle(CancelReservationPath, middleware.Wrap(handler.CancelReservation(r.Reservations), middlewaresWithUserAuth...)).Methods(http.MethodPost)
+	router.Handle(LivenessPath, middleware.Wrap(handler.Liveness(), middlewares...)).Methods(http.MethodGet)
+	router.Handle(ReadinessPath, middleware.Wrap(handler.Readiness(r.Database), middlewares...)).Methods(http.MethodGet)
 
 	return router
 }

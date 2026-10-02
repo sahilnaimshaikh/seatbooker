@@ -13,6 +13,7 @@ import (
 )
 
 const pgUniqueViolation = "23505"
+const pgLockNotAvailable = "55P03"
 
 type ReservationService struct {
 	conn *sql.DB
@@ -22,7 +23,11 @@ func NewReservationService(conn *sql.DB) *ReservationService {
 	return &ReservationService{conn: conn}
 }
 
-func (r *ReservationService) Reserve(ctx context.Context, showID, userID string, requestedSeats []string, idempotencyKey string) (Reservation, error) {
+func (r *ReservationService) Reserve(ctx context.Context, showID, userID string, requestedSeats []string, idempotencyKey string) (reservation Reservation, resultErr error) {
+	defer func() {
+		resultErr = reservationError(resultErr)
+	}()
+
 	if len(requestedSeats) == 0 || idempotencyKey == "" {
 		return Reservation{}, newError(CodeInvalidInput, "seats and idempotency_key are required")
 	}
@@ -197,4 +202,12 @@ func isUniqueViolation(err error) bool {
 		return pgErr.Code == pgUniqueViolation
 	}
 	return false
+}
+
+func reservationError(err error) error {
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) && pgErr.Code == pgLockNotAvailable {
+		return newError(CodeConflict, "reservation could not acquire the required locks")
+	}
+	return err
 }
