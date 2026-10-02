@@ -382,4 +382,17 @@ A non-local URL is rejected by default because the script writes data. Set `ALLO
 
 ## Deployment status
 
-Render is the intended API host and PostgreSQL is intended to remain separately managed. Deployment is not configured yet and there is no live URL. On Render's free web-service plan, migrations must be run separately against the managed database before deployment; paid plans can use a pre-deploy migration command. Configure `APP_PORT` to the port Render provides, set `DATABASE_URL`, `JWT_SECRET`, and `ADMIN_TOKEN` as secrets, and set the health-check path to `/ready`. The repository must be pushed to a public Git provider before Render can build it.
+The public repository is `https://github.com/sahilnaimshaikh/seatbooker`. A Render Blueprint is in `render.yaml` for the `seatbooking-api` Docker web service in Singapore on the free plan. A live Render service and URL have not been created yet.
+
+To deploy, connect the public GitHub repository in Render and create the service from its Blueprint. Enter the Neon direct PostgreSQL URL when Render prompts for `DATABASE_URL`; the Blueprint generates `JWT_SECRET` and `ADMIN_TOKEN`. It sets `APP_PORT` to `10000` and checks `/ready`.
+
+Render's free web-service plan does not provide a pre-deploy migration command. Before the first deploy, and before deploying any schema changes, run the migration locally with `.env` pointing `DATABASE_URL` at Neon. `config.New()` also requires non-empty `JWT_SECRET` and `ADMIN_TOKEN` values for this command, but the migration itself only uses the database URL; these local values do not need to match Render's generated secrets.
+
+```sh
+set -a
+source .env
+set +a
+go run ./cmd/seatbooking migrate
+```
+
+Then deploy the API from Render. Free services may spin down when idle, so the first request can have a cold-start delay. Metrics are exposed at `/metrics`; Render stdout logs are available from the service dashboard/CLI, but public reviewer access or a load-test recording still needs to be arranged.

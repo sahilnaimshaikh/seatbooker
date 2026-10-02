@@ -1,0 +1,18 @@
+services:
+  - type: web
+    name: seatbooking-api
+    runtime: docker
+    plan: free
+    region: singapore
+    branch: main
+    dockerCommand: ./seatbooking serve
+    healthCheckPath: /ready
+    envVars:
+      - key: APP_PORT
+        value: "10000"
+      - key: DATABASE_URL
+        sync: false
+      - key: JWT_SECRET
+        generateValue: true
+      - key: ADMIN_TOKEN
+        generateValue: true
