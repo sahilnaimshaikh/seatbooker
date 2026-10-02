@@ -26,4 +26,30 @@ const (
 
 	countSeatsByStatusQuery = `SELECT count(*) FROM seats
 		WHERE show_id = $1 AND status = $2`
+
+	insertReservationQuery = `INSERT INTO reservations
+		(idempotency_key, show_id, user_id, seats, amount_paise, status)
+		VALUES ($1, $2, $3, $4, $5, $6)
+		RETURNING id`
+
+	getReservationByIdempotencyKeyQuery = `SELECT id, show_id, user_id, seats, amount_paise, status
+		FROM reservations WHERE idempotency_key = $1`
+
+	cancelReservationQuery = `UPDATE reservations SET status = $1
+		WHERE id = $2 AND user_id = $3 AND status = $4
+		RETURNING show_id, seats`
+
+	ensureUserShowCountQuery = `INSERT INTO user_show_counts (show_id, user_id, held_count)
+		VALUES ($1, $2, 0)
+		ON CONFLICT (show_id, user_id) DO NOTHING`
+
+	lockUserShowCountQuery = `SELECT held_count FROM user_show_counts
+		WHERE show_id = $1 AND user_id = $2
+		FOR UPDATE`
+
+	incrementUserShowCountQuery = `UPDATE user_show_counts SET held_count = held_count + $1
+		WHERE show_id = $2 AND user_id = $3`
+
+	decrementUserShowCountQuery = `UPDATE user_show_counts SET held_count = held_count - $1
+		WHERE show_id = $2 AND user_id = $3`
 )
