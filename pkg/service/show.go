@@ -17,14 +17,6 @@ func NewShowService(conn *sql.DB) *ShowService {
 	return &ShowService{conn: conn}
 }
 
-type ShowSummary struct {
-	Show       contract.Show
-	Seats      []contract.Seat
-	Available  int
-	Confirmed  int
-	TotalSeats int
-}
-
 func (s *ShowService) CreateShow(ctx context.Context, name string, seatNos []string, pricePaise, perUserLimit int) (ShowSummary, error) {
 	if name == "" || len(seatNos) == 0 || pricePaise < 0 {
 		return ShowSummary{}, newError(CodeInvalidInput, "name, seats, and non-negative price_paise are required")

@@ -22,15 +22,6 @@ func NewReservationService(conn *sql.DB) *ReservationService {
 	return &ReservationService{conn: conn}
 }
 
-type Reservation struct {
-	ID          string
-	ShowID      string
-	UserID      string
-	Seats       []string
-	AmountPaise int
-	Status      string
-}
-
 func (r *ReservationService) Reserve(ctx context.Context, showID, userID string, requestedSeats []string, idempotencyKey string) (Reservation, error) {
 	if len(requestedSeats) == 0 || idempotencyKey == "" {
 		return Reservation{}, newError(CodeInvalidInput, "seats and idempotency_key are required")
@@ -125,6 +116,36 @@ func (r *ReservationService) Reserve(ctx context.Context, showID, userID string,
 		AmountPaise: amountPaise,
 		Status:      contract.ReservationStatusConfirmed,
 	}, nil
+}
+
+func (r *ReservationService) Cancel(ctx context.Context, reservationID, userID string) error {
+	tx, err := r.conn.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	reservations := db.NewReservationTable(tx)
+	seatTable := db.NewSeatTable(tx)
+	counts := db.NewUserShowCountTable(tx)
+
+	showID, seats, err := reservations.Cancel(ctx, reservationID, userID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return newError(CodeNotFound, "reservation not found")
+	}
+	if err != nil {
+		return err
+	}
+
+	if err := seatTable.Release(ctx, showID, seats, userID); err != nil {
+		return err
+	}
+
+	if err := counts.Decrement(ctx, showID, userID, len(seats)); err != nil {
+		return err
+	}
+
+	return tx.Commit()
 }
 
 func (r *ReservationService) replayIdempotentRequest(ctx context.Context, idempotencyKey string, requestedSeats []string) (Reservation, error) {
