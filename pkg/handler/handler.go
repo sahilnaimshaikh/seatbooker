@@ -95,6 +95,10 @@ func ReserveSeat(reservations ReservationService) http.HandlerFunc {
 			writeInvalidJSON(writer)
 			return
 		}
+		if hasDuplicateSeats(input.Seats) {
+			httpjson.WriteError(writer, http.StatusBadRequest, "invalid_input", "seats must not contain duplicates")
+			return
+		}
 		reservation, err := reservations.Reserve(request.Context(), showID, reqctx.UserID(request.Context()), input.Seats, input.IdempotencyKey)
 		if err != nil {
 			writeServiceError(writer, err)
@@ -102,6 +106,17 @@ func ReserveSeat(reservations ReservationService) http.HandlerFunc {
 		}
 		httpjson.Write(writer, http.StatusCreated, toReservationResponse(reservation))
 	}
+}
+
+func hasDuplicateSeats(seats []string) bool {
+	seen := make(map[string]struct{}, len(seats))
+	for _, seat := range seats {
+		if _, exists := seen[seat]; exists {
+			return true
+		}
+		seen[seat] = struct{}{}
+	}
+	return false
 }
 
 func CancelReservation(reservations ReservationService) http.HandlerFunc {

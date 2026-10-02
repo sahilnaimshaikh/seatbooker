@@ -1,11 +1,15 @@
 package handler
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 
+	"github.com/gorilla/mux"
+
+	"github.com/paytm-hack/seatbooking/pkg/reqctx"
 	"github.com/paytm-hack/seatbooking/pkg/service"
 )
 
@@ -55,5 +59,33 @@ func TestDecodeJSONClosesRequestBody(t *testing.T) {
 	}
 	if !body.closed {
 		t.Fatal("expected request body to be closed after decoding")
+	}
+}
+
+type reservationServiceStub struct {
+	called bool
+}
+
+func (stub *reservationServiceStub) Reserve(context.Context, string, string, []string, string) (service.Reservation, error) {
+	stub.called = true
+	return service.Reservation{}, nil
+}
+
+func (*reservationServiceStub) Cancel(context.Context, string, string) error { return nil }
+
+func TestReserveSeatRejectsDuplicateSeats(t *testing.T) {
+	reservations := &reservationServiceStub{}
+	request := httptest.NewRequest(http.MethodPost, "/shows/3b241101-e2bb-4255-8caf-4136c566a962/reserve", strings.NewReader(`{"seats":["A1","A1"],"idempotency_key":"key-1"}`))
+	request = mux.SetURLVars(request, map[string]string{"id": "3b241101-e2bb-4255-8caf-4136c566a962"})
+	request = request.WithContext(reqctx.WithUserID(request.Context(), "buyer-1"))
+	response := httptest.NewRecorder()
+
+	ReserveSeat(reservations).ServeHTTP(response, request)
+
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("expected status %d, got %d", http.StatusBadRequest, response.Code)
+	}
+	if reservations.called {
+		t.Fatal("reservation service must not be called for duplicate seats")
 	}
 }
