@@ -32,6 +32,14 @@ func (r *ReservationTable) GetByIdempotencyKey(ctx context.Context, idempotencyK
 	return res, err
 }
 
+func (r *ReservationTable) GetConfirmedShowIDForOwner(ctx context.Context, reservationID, userID string) (string, error) {
+	var showID string
+	err := r.q.QueryRowContext(ctx, getConfirmedReservationShowIDQuery,
+		reservationID, userID, contract.ReservationStatusConfirmed,
+	).Scan(&showID)
+	return showID, err
+}
+
 func (r *ReservationTable) Cancel(ctx context.Context, reservationID, userID string) (showID string, seats []string, err error) {
 	err = r.q.QueryRowContext(ctx, cancelReservationQuery,
 		contract.ReservationStatusCancelled, reservationID, userID, contract.ReservationStatusConfirmed,

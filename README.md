@@ -57,7 +57,7 @@ Compose runs the `migrate` service first and starts the API only if migration su
 
 ## API
 
-Successful and error responses use the JSON envelope `{"data": ...}` or `{"error":{"code":"...","message":"..."}}`.
+All API routes use the JSON envelope `{"data": ...}` on success or `{"error":{"code":"...","message":"..."}}` on errors, except `/metrics`, which returns Prometheus text format. UUID values below are examples; use IDs returned by your own requests.
 
 | Method and path                  | Purpose                                  | Authentication                       | Success        |
 | -------------------------------- | ---------------------------------------- | ------------------------------------ | -------------- |
@@ -72,23 +72,211 @@ Successful and error responses use the JSON envelope `{"data": ...}` or `{"error
 
 ### Authentication
 
-`POST /auth/login` accepts `{"user_id":"buyer-1"}` and returns a signed, expiring HS256 JWT. The reservation identity comes from the token subject, not the reservation body. This endpoint is a test identity issuer and does not authenticate real accounts; do not use it as production login.
+`POST /auth/login` is a test identity issuer. It accepts a user ID and returns a signed, expiring HS256 JWT. It does not verify a password or a real account, so it is for this challenge/testing only, not production login.
 
-Show creation uses the configured admin bearer token. Reserve requests take their idempotency key from the JSON body:
+Reservation identity is read from the JWT `sub` claim, never from the request body. Send it as `Authorization: Bearer <token>`. Show creation uses the configured `ADMIN_TOKEN` as its bearer token.
+
+### `POST /auth/login`
+
+Request:
 
 ```json
-{ "seats": ["A12"], "idempotency_key": "unique-key-for-this-action" }
+{
+  "user_id": "buyer-1"
+}
 ```
 
-### Reservation behavior
+Success (`200 OK`):
 
-- Money is an integer number of paise.
-- Seat lists are sorted before locking. The service locks the user's show-count row and requested seat rows inside one PostgreSQL transaction.
-- Multi-seat requests are **all-or-nothing**: if any requested seat is missing, taken, or the request exceeds the user limit, the transaction does not partially confirm seats.
-- Duplicate seat numbers in one request are rejected with `400`.
-- The reservation table's unique idempotency-key constraint ensures the same request returns the original reservation. Reusing the key with a different user, show, or seat list returns `409`.
-- A reservation is confirmed immediately. Release uses owner-only cancellation; there is no temporary `held` state or expiry workflow. Show reconciliation for this model is `available + confirmed = total_seats`.
-- Expected conflicts such as seat-taken, per-user-limit, idempotency mismatch, and lock timeout return `409`; invalid input returns `400`, missing resources return `404`, and unauthorized requests return `401`.
+```json
+{
+  "data": {
+    "token": "<signed-hs256-jwt>"
+  }
+}
+```
+
+An empty or whitespace-only `user_id`, malformed JSON, or unknown field returns `400 Bad Request`.
+
+### `POST /shows`
+
+Request (admin bearer token required):
+
+```http
+Authorization: Bearer <ADMIN_TOKEN>
+Content-Type: application/json
+```
+
+```json
+{
+  "name": "friday-night",
+  "seats": ["A1", "A2", "A3"],
+  "price_paise": 25000,
+  "per_user_limit": 4
+}
+```
+
+`per_user_limit` is optional and defaults to `4`.
+
+Success (`201 Created`):
+
+```json
+{
+  "data": {
+    "id": "3b241101-e2bb-4255-8caf-4136c566a962",
+    "name": "friday-night",
+    "price_paise": 25000,
+    "per_user_limit": 4,
+    "seats": [
+      { "seat_no": "A1", "status": "available" },
+      { "seat_no": "A2", "status": "available" },
+      { "seat_no": "A3", "status": "available" }
+    ],
+    "available": 3,
+    "confirmed": 0,
+    "total_seats": 3
+  }
+}
+```
+
+Missing/invalid fields or an invalid limit returns `400`. A missing or incorrect admin token returns `401`.
+
+### `GET /shows/{id}`
+
+Request:
+
+```http
+GET /shows/3b241101-e2bb-4255-8caf-4136c566a962
+```
+
+Success (`200 OK`) has the same show/seat shape as create-show, with current states and counts, for example:
+
+```json
+{
+  "data": {
+    "id": "3b241101-e2bb-4255-8caf-4136c566a962",
+    "name": "friday-night",
+    "price_paise": 25000,
+    "per_user_limit": 4,
+    "seats": [
+      { "seat_no": "A1", "status": "confirmed" },
+      { "seat_no": "A2", "status": "available" },
+      { "seat_no": "A3", "status": "available" }
+    ],
+    "available": 2,
+    "confirmed": 1,
+    "total_seats": 3
+  }
+}
+```
+
+An invalid UUID returns `400`; an unknown show returns `404`.
+
+### `POST /shows/{id}/reserve`
+
+Request (user bearer token required):
+
+```http
+Authorization: Bearer <USER_JWT>
+Content-Type: application/json
+```
+
+```json
+{
+  "seats": ["A1"],
+  "idempotency_key": "unique-key-for-this-action"
+}
+```
+
+The idempotency key comes from the body. Duplicate seat numbers are rejected. The token subject supplies `user_id`; any body `user_id` field is rejected as unknown.
+
+New reservation success (`201 Created`):
+
+```json
+{
+  "data": {
+    "reservation_id": "a6f1f401-d64a-4d9c-a05c-66dd0f44ca75",
+    "show_id": "3b241101-e2bb-4255-8caf-4136c566a962",
+    "user_id": "buyer-1",
+    "seats": ["A1"],
+    "amount_paise": 25000,
+    "status": "confirmed"
+  }
+}
+```
+
+An identical retry returns the original reservation with `201`; it does not reserve or charge again. A seat-taken, per-user-limit, or same-key/different-request conflict returns `409`. Duplicate seats, malformed JSON, or an invalid show UUID returns `400`; an unknown show returns `404`; an invalid/missing user token returns `401`.
+
+All requested seats are reserved **all-or-nothing**. If any seat is missing/taken or the request exceeds the user's limit, none of the requested seats are confirmed. Money is always integer paise.
+
+### `POST /reservations/{id}/cancel`
+
+Request (the reservation owner's bearer token is required):
+
+```http
+Authorization: Bearer <USER_JWT>
+```
+
+Success (`200 OK`):
+
+```json
+{
+  "data": {
+    "status": "cancelled"
+  }
+}
+```
+
+Only the owner can cancel. A missing reservation or one that cannot be cancelled returns `404`; an invalid UUID returns `400`; an invalid/missing token returns `401`. Released seats return to `available` and can be booked again. This project uses immediate confirmation and explicit cancellation; it has no temporary `held` state or expiry. Its reconciliation invariant is `available + confirmed = total_seats`.
+
+### `GET /health` and `GET /ready`
+
+No request body or authentication is needed.
+
+`GET /health` checks only that the service process responds (`200 OK`):
+
+```json
+{ "data": { "status": "ok" } }
+```
+
+`GET /ready` pings PostgreSQL with a bounded timeout. When reachable it returns `200 OK`:
+
+```json
+{ "data": { "status": "ready" } }
+```
+
+If PostgreSQL is unavailable, it returns `503 Service Unavailable`:
+
+```json
+{ "error": { "code": "not_ready", "message": "database unavailable" } }
+```
+
+### `GET /metrics`
+
+No request body or authentication is needed. This endpoint returns Prometheus text format, not the JSON envelope. Example lines:
+
+```text
+seatbooking_reservations_confirmed_total 1
+seatbooking_reservations_declined_total{reason="seat-taken"} 499
+seatbooking_reservations_declined_total{reason="per-user-limit"} 6
+seatbooking_reservations_declined_total{reason="idempotent-replay"} 1
+seatbooking_seats_available{show_id="3b241101-e2bb-4255-8caf-4136c566a962"} 2
+```
+
+The availability gauge is queried from PostgreSQL at scrape time. An idempotent replay returns the original `201` but is counted under the requested `idempotent-replay` metric reason, not as a new confirmation.
+
+### Common error envelope
+
+```json
+{
+  "error": {
+    "code": "seat_taken",
+    "message": "one or more requested seats are no longer available"
+  }
+}
+```
+
+Expected validation errors use `400`, authentication failures `401`, missing resources `404`, and reservation conflicts `409`. Unexpected internal errors currently return `500`.
 
 ### Test login example
 
@@ -195,4 +383,3 @@ A non-local URL is rejected by default because the script writes data. Set `ALLO
 ## Deployment status
 
 Render is the intended API host and PostgreSQL is intended to remain separately managed. Deployment is not configured yet and there is no live URL. On Render's free web-service plan, migrations must be run separately against the managed database before deployment; paid plans can use a pre-deploy migration command. Configure `APP_PORT` to the port Render provides, set `DATABASE_URL`, `JWT_SECRET`, and `ADMIN_TOKEN` as secrets, and set the health-check path to `/ready`. The repository must be pushed to a public Git provider before Render can build it.
-

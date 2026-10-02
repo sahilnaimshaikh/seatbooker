@@ -141,19 +141,34 @@ func (r *ReservationService) Cancel(ctx context.Context, reservationID, userID s
 	seatTable := db.NewSeatTable(tx)
 	counts := db.NewUserShowCountTable(tx)
 
-	showID, seats, err := reservations.Cancel(ctx, reservationID, userID)
+	showID, err := reservations.GetConfirmedShowIDForOwner(ctx, reservationID, userID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return newError(CodeNotFound, "reservation not found")
 	}
 	if err != nil {
 		return err
 	}
-
-	if err := seatTable.Release(ctx, showID, seats, userID); err != nil {
+	if _, err := counts.Lock(ctx, showID, userID); err != nil {
 		return err
 	}
 
-	if err := counts.Decrement(ctx, showID, userID, len(seats)); err != nil {
+	cancelledShowID, seats, err := reservations.Cancel(ctx, reservationID, userID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return newError(CodeNotFound, "reservation not found")
+	}
+	if err != nil {
+		return err
+	}
+	sort.Strings(seats)
+	if _, err := seatTable.Lock(ctx, cancelledShowID, seats); err != nil {
+		return err
+	}
+
+	if err := seatTable.Release(ctx, cancelledShowID, seats, userID); err != nil {
+		return err
+	}
+
+	if err := counts.Decrement(ctx, cancelledShowID, userID, len(seats)); err != nil {
 		return err
 	}
 

@@ -177,6 +177,63 @@ func TestConcurrentIdempotentRetriesCreateOneReservation(t *testing.T) {
 	}
 }
 
+func TestConcurrentCancelAndReserveDoNotDeadlock(t *testing.T) {
+	app := newIntegrationApp(t)
+	app.showID = app.createShow(t, "cancel-reserve-race", []string{"A1"}, 4)
+	const userID = "cancel-reserve-buyer"
+	reservationID := ""
+
+	for attempt := 0; attempt < 30; attempt++ {
+		if reservationID == "" {
+			status, createdID, apiError, err := app.reserve(userID, fmt.Sprintf("cancel-race-seed-%d", attempt), []string{"A1"})
+			if err != nil || status != http.StatusCreated {
+				t.Fatalf("seed reservation failed: status=%d api_error=%s err=%v", status, apiError, err)
+			}
+			reservationID = createdID
+		}
+
+		start := make(chan struct{})
+		cancelResult := make(chan reserveResult, 1)
+		reserveResultChan := make(chan reserveResult, 1)
+		go func(id string) {
+			<-start
+			status, apiError, err := app.cancel(userID, id)
+			cancelResult <- reserveResult{status: status, apiError: apiError, err: err}
+		}(reservationID)
+		go func(key string) {
+			<-start
+			status, newID, apiError, err := app.reserve(userID, key, []string{"A1"})
+			reserveResultChan <- reserveResult{status: status, reservationID: newID, apiError: apiError, err: err}
+		}(fmt.Sprintf("cancel-race-reserve-%d", attempt))
+		close(start)
+
+		cancelled := <-cancelResult
+		reserved := <-reserveResultChan
+		if cancelled.err != nil || cancelled.status != http.StatusOK {
+			t.Fatalf("cancel attempt %d failed: status=%d api_error=%s err=%v", attempt, cancelled.status, cancelled.apiError, cancelled.err)
+		}
+		if reserved.err != nil {
+			t.Fatalf("reserve attempt %d transport error: %v", attempt, reserved.err)
+		}
+		switch reserved.status {
+		case http.StatusCreated:
+			reservationID = reserved.reservationID
+		case http.StatusConflict:
+			reservationID = ""
+		default:
+			t.Fatalf("reserve attempt %d returned unexpected status %d: %s", attempt, reserved.status, reserved.apiError)
+		}
+	}
+
+	state := app.getShowForTest(t, app.showID)
+	if state.Data.Available+state.Data.Confirmed != state.Data.TotalSeats {
+		t.Fatalf("cancel/reserve race failed reconciliation: available=%d confirmed=%d total=%d", state.Data.Available, state.Data.Confirmed, state.Data.TotalSeats)
+	}
+	if state.Data.Available > 1 || state.Data.Confirmed > 1 {
+		t.Fatalf("cancel/reserve race produced invalid seat counts: %+v", state.Data)
+	}
+}
+
 func newIntegrationApp(t *testing.T) *integrationApp {
 	t.Helper()
 	databaseURL := os.Getenv("TEST_DATABASE_URL")
@@ -378,6 +435,27 @@ func (app *integrationApp) reserve(userID, idempotencyKey string, seats []string
 		apiError = envelope.Error.Code + ": " + envelope.Error.Message
 	}
 	return response.StatusCode, envelope.Data.ReservationID, apiError, nil
+}
+
+func (app *integrationApp) cancel(userID, reservationID string) (int, string, error) {
+	request, err := http.NewRequest(http.MethodPost, app.server.URL+"/reservations/"+reservationID+"/cancel", nil)
+	if err != nil {
+		return 0, "", err
+	}
+	request.Header.Set("Authorization", "Bearer "+userToken(userID))
+	response, err := app.client.Do(request)
+	if err != nil {
+		return 0, "", err
+	}
+	defer response.Body.Close()
+	var envelope apiEnvelope
+	if err := json.NewDecoder(response.Body).Decode(&envelope); err != nil {
+		return response.StatusCode, "", err
+	}
+	if envelope.Error == nil {
+		return response.StatusCode, "", nil
+	}
+	return response.StatusCode, envelope.Error.Code + ": " + envelope.Error.Message, nil
 }
 
 func (app *integrationApp) getShow(showID string) (apiEnvelope, int, error) {

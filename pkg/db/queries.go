@@ -39,6 +39,9 @@ const (
 	getReservationByIdempotencyKeyQuery = `SELECT id, show_id, user_id, seats, amount_paise, status
 		FROM reservations WHERE idempotency_key = $1`
 
+	getConfirmedReservationShowIDQuery = `SELECT show_id FROM reservations
+		WHERE id = $1 AND user_id = $2 AND status = $3`
+
 	cancelReservationQuery = `UPDATE reservations SET status = $1
 		WHERE id = $2 AND user_id = $3 AND status = $4
 		RETURNING show_id, seats`
