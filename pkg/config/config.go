@@ -8,16 +8,6 @@ import (
 	"time"
 )
 
-const (
-	defaultAppPort          = 8080
-	defaultLogLevel         = "info"
-	defaultMigrationsFolder = "migrations"
-	defaultDBMaxOpenConns   = 20
-	defaultDBMaxIdleConns   = 10
-	defaultDBConnTimeout    = 5 * time.Second
-	defaultJWTExpiry        = 24 * time.Hour
-)
-
 // Getter exposes read-only access to configuration. Handlers and factories
 // depend on this interface rather than the concrete Config so tests can
 // supply fakes.

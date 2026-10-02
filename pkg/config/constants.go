@@ -1,5 +1,17 @@
 package config
 
+import "time"
+
+const (
+	defaultAppPort          = 8080
+	defaultLogLevel         = "info"
+	defaultMigrationsFolder = "migrations"
+	defaultDBMaxOpenConns   = 20
+	defaultDBMaxIdleConns   = 10
+	defaultDBConnTimeout    = 5 * time.Second
+	defaultJWTExpiry        = 24 * time.Hour
+)
+
 const (
 	envEnvironment      = "ENVIRONMENT"
 	envLogLevel         = "LOG_LEVEL"
