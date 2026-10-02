@@ -7,6 +7,10 @@ const (
 	getShowQuery = `SELECT name, price_paise, per_user_limit
 		FROM shows WHERE id = $1`
 
+	listShowSeatAvailabilityQuery = `SELECT shows.id, count(seats.seat_no) FILTER (WHERE seats.status = $1)
+		FROM shows LEFT JOIN seats ON seats.show_id = shows.id
+		GROUP BY shows.id ORDER BY shows.id`
+
 	insertSeatsQuery = `INSERT INTO seats (show_id, seat_no, status)
 		SELECT $1, unnest($2::text[]), $3`
 

@@ -9,6 +9,7 @@ import (
 	"github.com/paytm-hack/seatbooking/pkg/config"
 	"github.com/paytm-hack/seatbooking/pkg/handler"
 	"github.com/paytm-hack/seatbooking/pkg/logctx"
+	"github.com/paytm-hack/seatbooking/pkg/metrics"
 	"github.com/paytm-hack/seatbooking/pkg/middleware"
 )
 
@@ -20,12 +21,14 @@ const (
 	CancelReservationPath = "/reservations/{id}/cancel"
 	LivenessPath          = "/health"
 	ReadinessPath         = "/ready"
+	MetricsPath           = "/metrics"
 )
 
 type Router struct {
 	Shows        handler.ShowService
 	Reservations handler.ReservationService
 	Database     handler.ReadinessChecker
+	Metrics      *metrics.Metrics
 	AppConfig    *config.Config
 	Context      context.Context
 }
@@ -48,10 +51,11 @@ func New(r *Router) http.Handler {
 	}), middlewares...)).Methods(http.MethodPost)
 	router.Handle(CreateShowPath, middleware.Wrap(handler.CreateShow(r.Shows), middlewaresWithAdminAuth...)).Methods(http.MethodPost)
 	router.Handle(GetShowPath, middleware.Wrap(handler.GetShow(r.Shows), middlewares...)).Methods(http.MethodGet)
-	router.Handle(ReserveSeatPath, middleware.Wrap(handler.ReserveSeat(r.Reservations), middlewaresWithUserAuth...)).Methods(http.MethodPost)
+	router.Handle(ReserveSeatPath, middleware.Wrap(handler.ReserveSeat(r.Reservations, r.Metrics), middlewaresWithUserAuth...)).Methods(http.MethodPost)
 	router.Handle(CancelReservationPath, middleware.Wrap(handler.CancelReservation(r.Reservations), middlewaresWithUserAuth...)).Methods(http.MethodPost)
 	router.Handle(LivenessPath, middleware.Wrap(handler.Liveness(), middlewares...)).Methods(http.MethodGet)
 	router.Handle(ReadinessPath, middleware.Wrap(handler.Readiness(r.Database), middlewares...)).Methods(http.MethodGet)
+	router.Handle(MetricsPath, middleware.Wrap(r.Metrics.Handler(), middlewares...)).Methods(http.MethodGet)
 
 	return router
 }

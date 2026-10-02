@@ -13,6 +13,7 @@ import (
 	"github.com/paytm-hack/seatbooking/pkg/config"
 	"github.com/paytm-hack/seatbooking/pkg/db/contract"
 	"github.com/paytm-hack/seatbooking/pkg/logctx"
+	"github.com/paytm-hack/seatbooking/pkg/metrics"
 	"github.com/paytm-hack/seatbooking/pkg/router"
 	"github.com/paytm-hack/seatbooking/pkg/service"
 )
@@ -42,6 +43,8 @@ type testReservations struct {
 	reserveCalled         bool
 	reserveUserID         string
 	reserveIdempotencyKey string
+	reserveReplayed       bool
+	reserveErr            error
 }
 
 type testDatabase struct {
@@ -58,24 +61,28 @@ func (reservations *testReservations) Reserve(_ context.Context, showID, userID 
 	reservations.reserveCalled = true
 	reservations.reserveUserID = userID
 	reservations.reserveIdempotencyKey = idempotencyKey
+	if reservations.reserveErr != nil {
+		return service.Reservation{}, reservations.reserveErr
+	}
 	return service.Reservation{
 		ID: "reservation-id", ShowID: showID, UserID: userID, Seats: seats,
-		AmountPaise: 25000, Status: contract.ReservationStatusConfirmed,
+		AmountPaise: 25000, Status: contract.ReservationStatusConfirmed, Replayed: reservations.reserveReplayed,
 	}, nil
 }
 
 func (*testReservations) Cancel(context.Context, string, string) error { return nil }
 
 func newTestRouter(shows *testShows, reservations *testReservations) http.Handler {
-	return newTestRouterWithDatabase(shows, reservations, &testDatabase{})
+	return newTestRouterWithDatabase(shows, reservations, &testDatabase{}, metrics.New(nil))
 }
 
-func newTestRouterWithDatabase(shows *testShows, reservations *testReservations, database *testDatabase) http.Handler {
+func newTestRouterWithDatabase(shows *testShows, reservations *testReservations, database *testDatabase, requestMetrics *metrics.Metrics) http.Handler {
 	ctx, _ := logctx.New(context.Background(), "test")
 	return router.New(&router.Router{
 		Shows:        shows,
 		Reservations: reservations,
 		Database:     database,
+		Metrics:      requestMetrics,
 		AppConfig: &config.Config{
 			JWTSecret: "jwt-secret", JWTExpiry: time.Hour, AdminToken: "admin-secret",
 		},
@@ -119,7 +126,8 @@ func TestCreateShowRequiresAdminAndDefaultsLimit(t *testing.T) {
 
 func TestReserveUsesAuthenticatedUserIdentity(t *testing.T) {
 	reservations := &testReservations{}
-	httpHandler := newTestRouter(&testShows{}, reservations)
+	requestMetrics := metrics.New(nil)
+	httpHandler := newTestRouterWithDatabase(&testShows{}, reservations, &testDatabase{}, requestMetrics)
 	request := httptest.NewRequest(http.MethodPost, "/auth/login", strings.NewReader(`{"user_id":"token-user"}`))
 	loginResponse := httptest.NewRecorder()
 	httpHandler.ServeHTTP(loginResponse, request)
@@ -146,6 +154,48 @@ func TestReserveUsesAuthenticatedUserIdentity(t *testing.T) {
 	}
 	if reservations.reserveIdempotencyKey != "key-1" {
 		t.Fatalf("expected idempotency key from request body, got %q", reservations.reserveIdempotencyKey)
+	}
+	reservations.reserveReplayed = true
+	request = httptest.NewRequest(http.MethodPost, "/shows/"+testShowID+"/reserve", strings.NewReader(`{"seats":["A1"],"idempotency_key":"key-1"}`))
+	request.Header.Set("Authorization", "Bearer "+loginBody.Data.Token)
+	response = httptest.NewRecorder()
+	httpHandler.ServeHTTP(response, request)
+	if response.Code != http.StatusCreated {
+		t.Fatalf("expected replay status %d, got %d", http.StatusCreated, response.Code)
+	}
+
+	for _, outcome := range []struct {
+		code   service.Code
+		reason string
+	}{
+		{code: service.CodeSeatTaken, reason: "seat-taken"},
+		{code: service.CodePerUserLimit, reason: "per-user-limit"},
+	} {
+		reservations.reserveReplayed = false
+		reservations.reserveErr = &service.Error{Code: outcome.code, Message: "declined"}
+		request = httptest.NewRequest(http.MethodPost, "/shows/"+testShowID+"/reserve", strings.NewReader(`{"seats":["A1"],"idempotency_key":"key-1"}`))
+		request.Header.Set("Authorization", "Bearer "+loginBody.Data.Token)
+		response = httptest.NewRecorder()
+		httpHandler.ServeHTTP(response, request)
+		if response.Code != http.StatusConflict {
+			t.Fatalf("expected decline status %d, got %d", http.StatusConflict, response.Code)
+		}
+	}
+
+	metricsResponse := httptest.NewRecorder()
+	httpHandler.ServeHTTP(metricsResponse, httptest.NewRequest(http.MethodGet, router.MetricsPath, nil))
+	metricOutput := metricsResponse.Body.String()
+	if !strings.Contains(metricOutput, "seatbooking_reservations_confirmed_total 1") {
+		t.Fatalf("expected one fresh reservation confirmation, got:\n%s", metricOutput)
+	}
+	for _, expected := range []string{
+		`reason="idempotent-replay"} 1`,
+		`reason="seat-taken"} 1`,
+		`reason="per-user-limit"} 1`,
+	} {
+		if !strings.Contains(metricOutput, expected) {
+			t.Fatalf("expected metrics output to include %q, got:\n%s", expected, metricOutput)
+		}
 	}
 }
 
@@ -175,7 +225,7 @@ func TestLoginRejectsEmptyUserID(t *testing.T) {
 
 func TestHealthEndpointsCheckOnlyReadinessDependency(t *testing.T) {
 	database := &testDatabase{pingErr: errors.New("database unavailable")}
-	httpHandler := newTestRouterWithDatabase(&testShows{}, &testReservations{}, database)
+	httpHandler := newTestRouterWithDatabase(&testShows{}, &testReservations{}, database, metrics.New(nil))
 
 	livenessRequest := httptest.NewRequest(http.MethodGet, router.LivenessPath, nil)
 	livenessResponse := httptest.NewRecorder()

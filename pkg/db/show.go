@@ -27,3 +27,21 @@ func (s *ShowTable) Get(ctx context.Context, showID string) (contract.Show, erro
 		Scan(&show.Name, &show.PricePaise, &show.PerUserLimit)
 	return show, err
 }
+
+func (s *ShowTable) ListSeatAvailability(ctx context.Context) ([]contract.ShowSeatAvailability, error) {
+	rows, err := s.q.QueryContext(ctx, listShowSeatAvailabilityQuery, contract.SeatStatusAvailable)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var availability []contract.ShowSeatAvailability
+	for rows.Next() {
+		var show contract.ShowSeatAvailability
+		if err := rows.Scan(&show.ShowID, &show.Available); err != nil {
+			return nil, err
+		}
+		availability = append(availability, show)
+	}
+	return availability, rows.Err()
+}

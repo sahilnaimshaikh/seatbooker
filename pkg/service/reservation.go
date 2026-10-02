@@ -181,6 +181,7 @@ func replayReservation(existing contract.Reservation, showID, userID string, req
 		Seats:       existing.Seats,
 		AmountPaise: existing.AmountPaise,
 		Status:      existing.Status,
+		Replayed:    true,
 	}, nil
 }
 

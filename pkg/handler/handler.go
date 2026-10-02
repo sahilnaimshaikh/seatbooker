@@ -13,6 +13,7 @@ import (
 
 	"github.com/paytm-hack/seatbooking/pkg/constants"
 	"github.com/paytm-hack/seatbooking/pkg/httpjson"
+	"github.com/paytm-hack/seatbooking/pkg/metrics"
 	"github.com/paytm-hack/seatbooking/pkg/reqctx"
 	"github.com/paytm-hack/seatbooking/pkg/service"
 )
@@ -83,7 +84,7 @@ func GetShow(shows ShowService) http.HandlerFunc {
 	}
 }
 
-func ReserveSeat(reservations ReservationService) http.HandlerFunc {
+func ReserveSeat(reservations ReservationService, requestMetrics *metrics.Metrics) http.HandlerFunc {
 	return func(writer http.ResponseWriter, request *http.Request) {
 		showID := mux.Vars(request)["id"]
 		if _, err := uuid.Parse(showID); err != nil {
@@ -101,10 +102,38 @@ func ReserveSeat(reservations ReservationService) http.HandlerFunc {
 		}
 		reservation, err := reservations.Reserve(request.Context(), showID, reqctx.UserID(request.Context()), input.Seats, input.IdempotencyKey)
 		if err != nil {
+			recordReservationDecline(requestMetrics, err)
 			writeServiceError(writer, err)
 			return
 		}
+		if requestMetrics != nil {
+			if reservation.Replayed {
+				requestMetrics.ReservationDeclined(metrics.DeclineIdempotentReplay)
+			} else {
+				requestMetrics.ReservationConfirmed()
+			}
+		}
 		httpjson.Write(writer, http.StatusCreated, toReservationResponse(reservation))
+	}
+}
+
+func recordReservationDecline(requestMetrics *metrics.Metrics, err error) {
+	if requestMetrics == nil {
+		return
+	}
+	var serviceErr *service.Error
+	if !errors.As(err, &serviceErr) {
+		return
+	}
+	switch serviceErr.Code {
+	case service.CodeSeatTaken:
+		requestMetrics.ReservationDeclined(metrics.DeclineSeatTaken)
+	case service.CodePerUserLimit:
+		requestMetrics.ReservationDeclined(metrics.DeclinePerUserLimit)
+	case service.CodeIdempotencyConflict:
+		requestMetrics.ReservationDeclined(metrics.DeclineIdempotentReplay)
+	case service.CodeConflict:
+		requestMetrics.ReservationDeclined(metrics.DeclineLockTimeout)
 	}
 }
 

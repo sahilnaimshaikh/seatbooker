@@ -15,8 +15,10 @@ import (
 
 	"github.com/paytm-hack/seatbooking/pkg/config"
 	"github.com/paytm-hack/seatbooking/pkg/constants"
+	"github.com/paytm-hack/seatbooking/pkg/db"
 	"github.com/paytm-hack/seatbooking/pkg/factory"
 	"github.com/paytm-hack/seatbooking/pkg/logctx"
+	"github.com/paytm-hack/seatbooking/pkg/metrics"
 	"github.com/paytm-hack/seatbooking/pkg/router"
 	"github.com/paytm-hack/seatbooking/pkg/service"
 )
@@ -77,10 +79,12 @@ func serve() error {
 	}()
 
 	database := appFactory.DB()
+	requestMetrics := metrics.New(db.NewShowTable(database))
 	handler := router.New(&router.Router{
 		Shows:        service.NewShowService(database),
 		Reservations: service.NewReservationService(database),
 		Database:     database,
+		Metrics:      requestMetrics,
 		AppConfig:    appConfig,
 		Context:      serverContext,
 	})

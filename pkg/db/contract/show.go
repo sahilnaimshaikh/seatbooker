@@ -6,3 +6,8 @@ type Show struct {
 	PricePaise   int
 	PerUserLimit int
 }
+
+type ShowSeatAvailability struct {
+	ShowID    string
+	Available int64
+}

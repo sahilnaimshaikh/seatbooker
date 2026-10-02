@@ -80,7 +80,7 @@ func TestReserveSeatRejectsDuplicateSeats(t *testing.T) {
 	request = request.WithContext(reqctx.WithUserID(request.Context(), "buyer-1"))
 	response := httptest.NewRecorder()
 
-	ReserveSeat(reservations).ServeHTTP(response, request)
+	ReserveSeat(reservations, nil).ServeHTTP(response, request)
 
 	if response.Code != http.StatusBadRequest {
 		t.Fatalf("expected status %d, got %d", http.StatusBadRequest, response.Code)

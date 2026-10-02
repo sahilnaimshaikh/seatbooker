@@ -17,4 +17,5 @@ type Reservation struct {
 	Seats       []string
 	AmountPaise int
 	Status      string
+	Replayed    bool
 }
