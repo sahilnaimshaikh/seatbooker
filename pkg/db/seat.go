@@ -18,8 +18,10 @@ func NewSeatTable(q Querier) *SeatTable {
 	return &SeatTable{q: q}
 }
 
-func (s *SeatTable) Insert(ctx context.Context, showID, seatNo string) error {
-	_, err := s.q.ExecContext(ctx, insertSeatQuery, showID, seatNo, contract.SeatStatusAvailable)
+// InsertMany creates one 'available' seat row per seatNo in a single
+// statement via unnest, instead of one round trip per seat.
+func (s *SeatTable) InsertMany(ctx context.Context, showID string, seatNos []string) error {
+	_, err := s.q.ExecContext(ctx, insertSeatsQuery, showID, pq.Array(seatNos), contract.SeatStatusAvailable)
 	return err
 }
 

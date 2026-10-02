@@ -7,8 +7,8 @@ const (
 	getShowQuery = `SELECT name, price_paise, per_user_limit
 		FROM shows WHERE id = $1`
 
-	insertSeatQuery = `INSERT INTO seats (show_id, seat_no, status)
-		VALUES ($1, $2, $3)`
+	insertSeatsQuery = `INSERT INTO seats (show_id, seat_no, status)
+		SELECT $1, unnest($2::text[]), $3`
 
 	listSeatsQuery = `SELECT seat_no, status FROM seats
 		WHERE show_id = $1 ORDER BY seat_no`
