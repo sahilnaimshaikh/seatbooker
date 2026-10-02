@@ -45,6 +45,14 @@ func (r *ReservationService) Reserve(ctx context.Context, showID, userID string,
 	counts := db.NewUserShowCountTable(tx)
 	reservations := db.NewReservationTable(tx)
 
+	existing, err := reservations.GetByIdempotencyKey(ctx, idempotencyKey)
+	if err == nil {
+		return replayReservation(existing, showID, userID, seats)
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		return Reservation{}, err
+	}
+
 	show, err := shows.Get(ctx, showID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Reservation{}, newError(CodeNotFound, "show not found")
@@ -53,6 +61,14 @@ func (r *ReservationService) Reserve(ctx context.Context, showID, userID string,
 		return Reservation{}, err
 	}
 	amountPaise := show.PricePaise * len(seats)
+	reservationID, insertErr := reservations.Insert(ctx, idempotencyKey, showID, userID, seats, amountPaise, contract.ReservationStatusConfirmed)
+	if insertErr != nil {
+		if isUniqueViolation(insertErr) {
+			tx.Rollback()
+			return r.replayIdempotentRequest(ctx, idempotencyKey, showID, userID, seats)
+		}
+		return Reservation{}, insertErr
+	}
 
 	if err := counts.Ensure(ctx, showID, userID); err != nil {
 		return Reservation{}, err
@@ -63,15 +79,6 @@ func (r *ReservationService) Reserve(ctx context.Context, showID, userID string,
 	}
 	if heldCount+len(seats) > show.PerUserLimit {
 		return Reservation{}, newError(CodePerUserLimit, "reservation would exceed per-user seat limit")
-	}
-
-	reservationID, insertErr := reservations.Insert(ctx, idempotencyKey, showID, userID, seats, amountPaise, contract.ReservationStatusConfirmed)
-	if insertErr != nil {
-		if isUniqueViolation(insertErr) {
-			tx.Rollback()
-			return r.replayIdempotentRequest(ctx, idempotencyKey, seats)
-		}
-		return Reservation{}, insertErr
 	}
 
 	lockedSeats, err := seatTable.Lock(ctx, showID, seats)
@@ -148,15 +155,18 @@ func (r *ReservationService) Cancel(ctx context.Context, reservationID, userID s
 	return tx.Commit()
 }
 
-func (r *ReservationService) replayIdempotentRequest(ctx context.Context, idempotencyKey string, requestedSeats []string) (Reservation, error) {
+func (r *ReservationService) replayIdempotentRequest(ctx context.Context, idempotencyKey, showID, userID string, requestedSeats []string) (Reservation, error) {
 	reservations := db.NewReservationTable(r.conn)
 	existing, err := reservations.GetByIdempotencyKey(ctx, idempotencyKey)
 	if err != nil {
 		return Reservation{}, err
 	}
+	return replayReservation(existing, showID, userID, requestedSeats)
+}
 
-	if !sameSeats(existing.Seats, requestedSeats) {
-		return Reservation{}, newError(CodeIdempotencyConflict, "idempotency key was already used with a different set of seats")
+func replayReservation(existing contract.Reservation, showID, userID string, requestedSeats []string) (Reservation, error) {
+	if existing.ShowID != showID || existing.UserID != userID || !sameSeats(existing.Seats, requestedSeats) {
+		return Reservation{}, newError(CodeIdempotencyConflict, "idempotency key was already used with a different request")
 	}
 
 	return Reservation{
