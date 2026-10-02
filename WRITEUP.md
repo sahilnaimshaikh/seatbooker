@@ -40,7 +40,9 @@ Expected seat-taken, per-user-limit, idempotency-conflict, and lock-timeout outc
 
 ## Observability
 
-Structured JSON logs go to stdout. The middleware records request ID, method, path, status, latency, and a user-ID field. The router currently places logging outside authentication, so the user-ID field may be empty for authenticated requests; moving/enriching the logging context is follow-up work. The platform/container captures stdout, but public log access or a recording under load is not configured yet.
+Structured JSON logs go to stdout. The middleware records request ID, method, path, status, latency, and a user-ID field. The router currently places logging outside authentication, so the user-ID field may be empty for authenticated requests; moving/enriching the logging context is follow-up work. Render captures stdout in the [service Logs page](https://dashboard.render.com/web/srv-davpm33ncjis73f9t2ag/logs); this requires Render dashboard access and is not a public log endpoint.
+
+The deployed API is at [https://seatbooking-api.onrender.com](https://seatbooking-api.onrender.com), and its public Prometheus endpoint is [https://seatbooking-api.onrender.com/metrics](https://seatbooking-api.onrender.com/metrics). The endpoint was verified with HTTP `200` after deployment. Counter-vector series are created when their reason label is first used, and the availability gauge emits one series per existing show.
 
 `GET /metrics` exposes:
 
@@ -62,4 +64,4 @@ The PostgreSQL integration suite uses `TEST_DATABASE_URL`, creates a uniquely na
 
 The burst script calls the real HTTP endpoints and reports confirmations, replays, decline reasons, 5xx/transport errors, and final reconciliation. It creates shows and reservations that remain in the target database, so it must be run against a test database. Remote runs require explicit opt-in.
 
-Remaining work: finish the metrics/service/handler layering and authenticated log context; classify transient DB errors as `503`; publish/configure the Render service and Neon connection, run the separate migration step, and provide the live URL plus metrics/log access. The test-token login is intentionally challenge-only and accepts an arbitrary user ID; it must not be treated as production authentication.
+Remaining work: finish the metrics/service/handler layering and authenticated log context, and classify transient DB errors as `503`. The Render service and Neon connection are live; the container startup applies migrations before serving. The metrics endpoint is public, while application logs require Render dashboard access. The test-token login is intentionally challenge-only and accepts an arbitrary user ID; it must not be treated as production authentication.

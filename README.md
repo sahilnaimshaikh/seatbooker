@@ -4,7 +4,7 @@ A PostgreSQL-backed JSON API for assigned-seat reservations. The project focuses
 
 ## Current status
 
-The API, migrations, health checks, Prometheus metrics, and burst test are implemented. Public hosting and the live URL are not configured yet. The selected deployment direction is a Render web service with PostgreSQL managed separately (Neon was discussed, but a database URL must be configured before deploying).
+The API is deployed on Render with PostgreSQL hosted separately on Neon. The live service URL, metrics endpoint, and log access are documented below.
 
 ## Requirements
 
@@ -340,6 +340,8 @@ Reservation success is `201`; a seat conflict, user-limit decline, or reused key
   - `seatbooking_seats_available{show_id="..."}`
 - Idempotent replays return the original successful `201` response; the metrics implementation records them under the requested `idempotent-replay` reason and does not count them as a new confirmation.
 - Structured request logs go to stdout and include the request ID, method, path, status, and latency. The platform/container runtime captures stdout; public log access depends on the hosting provider.
+- The deployed metrics endpoint is [https://seatbooking-api.onrender.com/metrics](https://seatbooking-api.onrender.com/metrics). It is public and returns Prometheus text format. Counter-vector series appear after their reason label is used; availability gauges appear for shows in the database.
+- Deployed application logs are available in the [Render service Logs page](https://dashboard.render.com/web/srv-davpm33ncjis73f9t2ag/logs). This dashboard requires Render account access; logs are not exposed through a public API.
 
 ## Tests
 
@@ -382,17 +384,12 @@ A non-local URL is rejected by default because the script writes data. Set `ALLO
 
 ## Deployment status
 
-The public repository is `https://github.com/sahilnaimshaikh/seatbooker`. A Render Blueprint is in `render.yaml` for the `seatbooking-api` Docker web service in Singapore on the free plan. A live Render service and URL have not been created yet.
+The public repository is `https://github.com/sahilnaimshaikh/seatbooker`. The `seatbooking-api` Docker web service runs in Render's Singapore region on the free plan and uses Neon PostgreSQL.
 
-To deploy, connect the public GitHub repository in Render and create the service from its Blueprint. Enter the Neon direct PostgreSQL URL when Render prompts for `DATABASE_URL`; the Blueprint generates `JWT_SECRET` and `ADMIN_TOKEN`. It sets `APP_PORT` to `10000` and checks `/ready`.
+- API: [https://seatbooking-api.onrender.com](https://seatbooking-api.onrender.com)
+- Health: [https://seatbooking-api.onrender.com/health](https://seatbooking-api.onrender.com/health)
+- Readiness: [https://seatbooking-api.onrender.com/ready](https://seatbooking-api.onrender.com/ready)
+- Prometheus metrics: [https://seatbooking-api.onrender.com/metrics](https://seatbooking-api.onrender.com/metrics)
+- Application logs: [Render service Logs page](https://dashboard.render.com/web/srv-davpm33ncjis73f9t2ag/logs), available to users with Render dashboard access
 
-Render's free web-service plan does not provide a pre-deploy migration command. Before the first deploy, and before deploying any schema changes, run the migration locally with `.env` pointing `DATABASE_URL` at Neon. `config.New()` also requires non-empty `JWT_SECRET` and `ADMIN_TOKEN` values for this command, but the migration itself only uses the database URL; these local values do not need to match Render's generated secrets.
-
-```sh
-set -a
-source .env
-set +a
-go run ./cmd/seatbooking migrate
-```
-
-Then deploy the API from Render. Free services may spin down when idle, so the first request can have a cold-start delay. Metrics are exposed at `/metrics`; Render stdout logs are available from the service dashboard/CLI, but public reviewer access or a load-test recording still needs to be arranged.
+The container entrypoint applies pending migrations before starting the API. A migration failure stops startup; successful repeated runs are safe. Local Docker Compose retains its separate migration service and waits for it before starting the API. Render checks `/ready`. Free services may spin down when idle, so the first request can have a cold-start delay.
