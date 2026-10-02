@@ -5,7 +5,7 @@ services:
     plan: free
     region: singapore
     branch: main
-    dockerCommand: ./seatbooking serve
+    dockerCommand: sh ./docker-entrypoint.sh
     healthCheckPath: /ready
     envVars:
       - key: APP_PORT

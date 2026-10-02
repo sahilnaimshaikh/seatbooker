@@ -6,4 +6,4 @@ COPY . .
 RUN go mod download && go build -o seatbooking ./cmd/seatbooking
 
 EXPOSE 8080
-CMD ["./seatbooking", "serve"]
+CMD ["sh", "./docker-entrypoint.sh"]
