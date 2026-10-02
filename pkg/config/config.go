@@ -8,9 +8,6 @@ import (
 	"time"
 )
 
-// Getter exposes read-only access to configuration. Handlers and factories
-// depend on this interface rather than the concrete Config so tests can
-// supply fakes.
 type Getter interface {
 	GetEnvironment() string
 	GetAppPort() int
@@ -27,9 +24,6 @@ type Getter interface {
 
 var _ Getter = (*Config)(nil)
 
-// Config holds all runtime configuration for the service, sourced from
-// environment variables. There is no secrets file — every value here is
-// safe to log except JWTSecret and AdminToken, which Loggable redacts.
 type Config struct {
 	Environment      string        `json:"environment"`
 	LogLevel         string        `json:"log_level"`
@@ -56,10 +50,6 @@ func (c Config) GetJWTSecret() string            { return c.JWTSecret }
 func (c Config) GetJWTExpiry() time.Duration     { return c.JWTExpiry }
 func (c Config) GetAdminToken() string           { return c.AdminToken }
 
-// New loads configuration from environment variables, applying defaults for
-// anything not explicitly set. DATABASE_URL, JWT_SECRET, and ADMIN_TOKEN
-// are mandatory — the service refuses to start without them rather than
-// falling back to an insecure default.
 func New() (*Config, error) {
 	databaseURL, err := mandatory(envDatabaseURL)
 	if err != nil {
@@ -91,8 +81,6 @@ func New() (*Config, error) {
 	return cfg, nil
 }
 
-// Loggable renders the config as JSON with secrets stripped, safe to put in
-// a startup log line.
 func (c Config) Loggable() []byte {
 	data, err := json.Marshal(c)
 	if err != nil {
@@ -101,9 +89,6 @@ func (c Config) Loggable() []byte {
 	return data
 }
 
-// mandatory reads key from the environment, returning an error if it is
-// unset or empty — used for values that must never silently fall back to
-// a default (secrets, connection strings).
 func mandatory(key string) (string, error) {
 	v := os.Getenv(key)
 	if v == "" {

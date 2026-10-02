@@ -9,9 +9,6 @@ import (
 	"github.com/paytm-hack/seatbooking/pkg/db/contract"
 )
 
-// ShowService owns the business rules around creating and reading shows.
-// It opens its own transactions and constructs db-layer tables bound to
-// them — callers never see a *sql.Tx or a Querier.
 type ShowService struct {
 	conn *sql.DB
 }
@@ -28,9 +25,6 @@ type ShowSummary struct {
 	TotalSeats int
 }
 
-// CreateShow inserts the show row and one seat row per requested seat
-// number, all 'available', in a single transaction — either every seat
-// exists or none do.
 func (s *ShowService) CreateShow(ctx context.Context, name string, seatNos []string, pricePaise, perUserLimit int) (ShowSummary, error) {
 	if name == "" || len(seatNos) == 0 || pricePaise < 0 {
 		return ShowSummary{}, newError(CodeInvalidInput, "name, seats, and non-negative price_paise are required")
@@ -74,8 +68,6 @@ func (s *ShowService) CreateShow(ctx context.Context, name string, seatNos []str
 	return summary, nil
 }
 
-// GetShow returns every seat's current status plus the reconciliation
-// counts (available + confirmed == total_seats must hold here).
 func (s *ShowService) GetShow(ctx context.Context, showID string) (ShowSummary, error) {
 	shows := db.NewShowTable(s.conn)
 	seats := db.NewSeatTable(s.conn)

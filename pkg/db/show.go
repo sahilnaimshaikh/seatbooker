@@ -6,10 +6,6 @@ import (
 	"github.com/paytm-hack/seatbooking/pkg/db/contract"
 )
 
-// ShowTable is bound to a single Querier (a *sql.DB for standalone use, or
-// a *sql.Tx when the caller needs this alongside other tables inside one
-// transaction) at construction time, so callers never pass a querier
-// per-call.
 type ShowTable struct {
 	q Querier
 }

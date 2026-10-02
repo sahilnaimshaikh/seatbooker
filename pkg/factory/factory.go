@@ -13,12 +13,6 @@ type Factory struct {
 	db *sql.DB
 }
 
-// New opens the Postgres connection pool. sql.Open does not dial the
-// database — it only validates the DSN and prepares the pool — so this
-// returns immediately even if Postgres is still starting up elsewhere.
-// Actual reachability is checked continuously by the readiness handler,
-// not here, so a slow-to-wake dependency never blocks the server from
-// binding its port.
 func New(cfg config.Getter) (*Factory, error) {
 	db, err := sql.Open("pgx", cfg.GetDatabaseURL())
 	if err != nil {

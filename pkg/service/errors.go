@@ -1,8 +1,5 @@
 package service
 
-// Code identifies a specific domain outcome a service call can return.
-// Handlers map each Code to an HTTP status — the service layer itself
-// knows nothing about HTTP.
 type Code string
 
 const (
@@ -13,10 +10,6 @@ const (
 	CodeInvalidInput        Code = "invalid_input"
 )
 
-// Error is a domain-level outcome (a clean decline, not a crash). Service
-// methods return *Error for every expected failure path — seat already
-// taken, over limit, not found, bad input — so callers can branch on Code
-// without parsing strings or depending on database error types.
 type Error struct {
 	Code    Code
 	Message string
