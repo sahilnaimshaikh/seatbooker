@@ -69,7 +69,7 @@ func New() (*Config, error) {
 		LogLevel:         optional(envLogLevel, defaultLogLevel),
 		AppPort:          optionalInt(envAppPort, defaultAppPort),
 		DatabaseURL:      databaseURL,
-		MigrationsFolder: optional(envMigrationsFolder, defaultMigrationsFolder),
+		MigrationsFolder: optional(envMigrationsFolder, ""),
 		DBMaxOpenConns:   optionalInt(envDBMaxOpenConns, defaultDBMaxOpenConns),
 		DBMaxIdleConns:   optionalInt(envDBMaxIdleConns, defaultDBMaxIdleConns),
 		DBConnTimeout:    defaultDBConnTimeout,
